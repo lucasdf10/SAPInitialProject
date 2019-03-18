@@ -1,10 +1,15 @@
 package com.example.sapinitialproject;
 
 
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.ServiceConnection;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
@@ -109,6 +114,33 @@ public class MainActivity extends AppCompatActivity {
     private ESPMContainer myOfflineServiceContainer;
     private OfflineODataProvider myOfflineDataProvider;
 
+    // Don't attempt to unbind from the service unless the client has received some
+// information about the service's state.
+    private boolean shouldUnbind;
+    // To invoke the bound service, first make sure that this value is not null.
+    private OfflineODataForegroundService boundService;
+
+    private ServiceConnection connection = new ServiceConnection() {
+        public void onServiceConnected(ComponentName className, IBinder service) {
+            // This is called when the connection with the service has been
+            // established, giving us the service object we can use to
+            // interact with the service.  Because we have bound to a explicit
+            // service that we know is running in our own process, we can
+            // cast its IBinder to a concrete class and directly access it.
+            boundService = ((OfflineODataForegroundService.LocalBinder)service).getService();
+        }
+
+        public void onServiceDisconnected(ComponentName className) {
+            /*
+            This is called when the connection with the service has been
+            unexpectedly disconnected -- that is, its process crashed.
+            Because it is running in our same process, we should never
+            see this happen.
+            */
+            boundService = null;
+        }
+    };
+
     public MainActivity() {
     }
 
@@ -125,6 +157,7 @@ public class MainActivity extends AppCompatActivity {
         Logging.initialize(this.getApplicationContext(), cb);
         myRootLogger = Logging.getRootLogger();
         myLogger =  LoggerFactory.getLogger(MainActivity.class);
+        doBindService();
         onRegister(null);
         setContentView(R.layout.activity_main);
     }
@@ -437,5 +470,31 @@ public class MainActivity extends AppCompatActivity {
             toastAMessage("Failed to upload the offline store, sync failed with error: " + e.toString());
             Log.d(myTag, "Failed to upload the offline store, sync failed with error: " + e.toString());
         });
+    }
+
+    void doBindService() {
+        // Attempts to establish a connection with the service.
+        if (bindService(new Intent(MainActivity.this, OfflineODataForegroundService.class),
+                connection, Context.BIND_AUTO_CREATE)) {
+            shouldUnbind = true;
+        }
+        else {
+            Log.e(myTag, "Error: The requested service doesn't " +
+                    "exist, or this client isn't allowed access to it.");
+        }
+    }
+
+    void doUnbindService() {
+        if (shouldUnbind) {
+            // Release information about the service's state.
+            unbindService(connection);
+            shouldUnbind = false;
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        doUnbindService();
     }
 }
