@@ -57,6 +57,13 @@
                 android:onClick="onOfflineOData"
                 android:enabled="false"
                 android:text="Offline OData" />
+            <Button
+                android:id="@+id/b_offlineSync"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:onClick="performSync"
+                android:enabled="false"
+                android:text="Sync" />
 
         </LinearLayout>
     </ScrollView>

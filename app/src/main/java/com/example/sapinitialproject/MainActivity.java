@@ -53,11 +53,19 @@ import com.sap.cloud.mobile.foundation.usage.AppUsage;
 import com.sap.cloud.mobile.foundation.usage.AppUsageInfo;
 import com.sap.cloud.mobile.foundation.usage.AppUsageUploader;
 import com.sap.cloud.mobile.odata.DataQuery;
+import com.sap.cloud.mobile.odata.EntitySet;
+import com.sap.cloud.mobile.odata.EntityType;
+import com.sap.cloud.mobile.odata.EntityValue;
+import com.sap.cloud.mobile.odata.EntityValueList;
 import com.sap.cloud.mobile.odata.OnlineODataProvider;
+import com.sap.cloud.mobile.odata.Property;
 import com.sap.cloud.mobile.odata.core.AndroidSystem;
 import com.sap.cloud.mobile.odata.offline.OfflineODataDefiningQuery;
+import com.sap.cloud.mobile.odata.offline.OfflineODataDelegate;
 import com.sap.cloud.mobile.odata.offline.OfflineODataException;
+import com.sap.cloud.mobile.odata.offline.OfflineODataFileDownloadProgress;
 import com.sap.cloud.mobile.odata.offline.OfflineODataParameters;
+import com.sap.cloud.mobile.odata.offline.OfflineODataProgress;
 import com.sap.cloud.mobile.odata.offline.OfflineODataProvider;
 
 import org.json.JSONException;
@@ -330,11 +338,37 @@ public class MainActivity extends AppCompatActivity {
         //logger.setLevel(Level.ALL);
         AndroidSystem.setContext(getApplicationContext());
 
+        OfflineODataDelegate delegate = new OfflineODataDelegate() {
+            @Override
+            public void updateDownloadProgress(OfflineODataProvider provider, OfflineODataProgress progress) {
+                super.updateDownloadProgress(provider, progress);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        // As an example, log the # of bytes received
+                        Log.d(myTag, "Download Bytes Received: " + progress.getBytesReceived());
+                    }
+                });
+            }
+
+            @Override
+            public void updateFileDownloadProgress(OfflineODataProvider provider, OfflineODataFileDownloadProgress progress) {
+                super.updateFileDownloadProgress(provider, progress);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        // As an example, log the # of bytes received
+                        Log.d(myTag, "Update File Download Bytes Received: " + progress.getBytesReceived());
+                    }
+                });
+            }
+        };
+
         try {
             URL url = new URL(serviceURL + "/" + connectionID);
             OfflineODataParameters offParam = new OfflineODataParameters();
             offParam.setEnableRepeatableRequests(false);
-            myOfflineDataProvider = new OfflineODataProvider(url, offParam, myOkHttpClient, null, null);
+            myOfflineDataProvider = new OfflineODataProvider(url, offParam, myOkHttpClient, null, delegate);
             OfflineODataDefiningQuery myDefiningQuery = new OfflineODataDefiningQuery("Products", "Products", false);
             myOfflineDataProvider.addDefiningQuery(myDefiningQuery);
         } catch (OfflineODataException e) {
@@ -353,6 +387,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void run() {
                     offlineODataButton.setEnabled(true);
+                    findViewById(R.id.b_offlineSync).setEnabled(true);
                 }
             });
             myOfflineServiceContainer = new ESPMContainer(myOfflineDataProvider);
@@ -360,6 +395,47 @@ public class MainActivity extends AppCompatActivity {
         }, (OfflineODataException offlineOdataException) -> {
             Log.d(myTag, "Offline store did not open.", offlineOdataException);
             toastAMessage("Offline store failed to open.  " + offlineOdataException.getMessage());
+        });
+
+
+    }
+
+    public void performSync(View v) {
+        toastAMessage("Performing offline store sync.");
+        Log.d(myTag, "Performing offline store sync.");
+        Log.d(myTag, "Beginning offline store upload.");
+        myOfflineDataProvider.upload(() -> {
+            toastAMessage("Completed upload, beginning download.");
+            Log.d(myTag, "Completed upload, beginning download.");
+            myOfflineDataProvider.download(() -> {
+                toastAMessage("Completed download, sync complete.");
+                Log.d(myTag, "Completed download, sync complete.");
+                EntitySet errorArchiveSet = myOfflineServiceContainer.getEntitySet("ErrorArchive");
+                EntityType errorArchiveType = errorArchiveSet.getEntityType();
+
+                Property affectedEntityNavProp = errorArchiveType.getProperty("AffectedEntity");
+                Property requestIDProp = errorArchiveType.getProperty("RequestID");
+// more properties such as RequestBody, RequestMethod, RequestURL, Message
+// CustomTag, Domain, HTTpStatusCode, Code, and InnerError
+
+                DataQuery query = new DataQuery().from(errorArchiveSet).orderBy(requestIDProp);
+                EntityValueList errorEntities = myOfflineServiceContainer.executeQuery(query).getEntityList();
+
+// Iterate through the entities that have errors
+                for (EntityValue errorEntity : errorEntities) {
+                    myOfflineServiceContainer.loadProperty(affectedEntityNavProp, errorEntity);
+                    EntityValue affectedEntity = affectedEntityNavProp.getEntity(errorEntity);
+                    // Process each affected entity
+                    // For this example application, we just log the entity
+                    Log.d(myTag,"Error found: " + affectedEntity.toString());
+                }
+            }, e -> {
+                toastAMessage("Failed to download the offline store, sync failed with error: " + e.toString());
+                Log.d(myTag, "Failed to download the offline store, sync failed with error: " + e.toString());
+            });
+        }, e -> {
+            toastAMessage("Failed to upload the offline store, sync failed with error: " + e.toString());
+            Log.d(myTag, "Failed to upload the offline store, sync failed with error: " + e.toString());
         });
     }
 }
