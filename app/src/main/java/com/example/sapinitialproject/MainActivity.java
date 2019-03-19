@@ -114,6 +114,9 @@ public class MainActivity extends AppCompatActivity {
     private ESPMContainer myOfflineServiceContainer;
     private OfflineODataProvider myOfflineDataProvider;
 
+    private BasicAuthPersistentStore bapStore;
+    private long startTime;
+
     // Don't attempt to unbind from the service unless the client has received some
 // information about the service's state.
     private boolean shouldUnbind;
@@ -147,6 +150,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        startTime = System.currentTimeMillis();
         Log.d(myTag, "onCreate");
         deviceID = Settings.Secure.getString(this.getContentResolver(), Settings.Secure.ANDROID_ID);
         Logging.ConfigurationBuilder cb = new Logging.ConfigurationBuilder()
@@ -158,6 +162,17 @@ public class MainActivity extends AppCompatActivity {
         myRootLogger = Logging.getRootLogger();
         myLogger =  LoggerFactory.getLogger(MainActivity.class);
         doBindService();
+        SecureKeyValueStore myStore = new SecureKeyValueStore(this.getApplicationContext(), "mySecureStore");
+        try {
+            myStore.open(EncryptionUtil.getEncryptionKey("myAlias"));  //For additional security, consider using a passcode screen.
+            bapStore = new BasicAuthPersistentStore(myStore);
+        }
+        catch (OpenFailureException e) {
+            e.printStackTrace();
+        }
+        catch (EncryptionError encryptionError) {
+            encryptionError.printStackTrace();
+        }
         onRegister(null);
         setContentView(R.layout.activity_main);
     }
@@ -180,7 +195,7 @@ public class MainActivity extends AppCompatActivity {
         authLogger.setLevel(Level.DEBUG);
         myOkHttpClient = new OkHttpClient.Builder()
                 .addInterceptor(new AppHeadersInterceptor(appID, deviceID, "1.0"))
-                .authenticator(new BasicAuthDialogAuthenticator())
+                .authenticator(new BasicAuthDialogAuthenticator(bapStore))
                 .cookieJar(new WebkitCookieJar())
                 .build();
 
@@ -207,6 +222,9 @@ public class MainActivity extends AppCompatActivity {
                     enableButtonsOnRegister(true);
                     getUser();
                     setupOfflineOData();
+                    long registerTime = System.currentTimeMillis() - startTime;
+                    float registerTimeInSeconds = new Float(Math.round(registerTime/10)) / 100;
+                    Log.d(myTag, "Registration finished " + registerTimeInSeconds + " seconds after the application started.");
                 }
                 else { //called if the credentials are incorrect
                     Log.d(myTag, "Registration failed " + response.networkResponse());
@@ -331,12 +349,15 @@ public class MainActivity extends AppCompatActivity {
     private void enableButtonsOnRegister(final boolean enable) {
         final Button uploadLogButton = (Button) findViewById(R.id.b_uploadLog);
         final Button onlineODataButton = (Button) findViewById(R.id.b_odata);
+        final Button unregisterButton = (Button) findViewById(R.id.b_unregister);
         Handler handler = new Handler(Looper.getMainLooper());
         handler.post(new Runnable() {
             @Override
             public void run() {
                 uploadLogButton.setEnabled(enable);
                 onlineODataButton.setEnabled(enable);
+                unregisterButton.setEnabled(enable);
+
             }
         });
     }
@@ -369,6 +390,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupOfflineOData() {
         Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("com.sap.cloud.mobile.odata");
         //logger.setLevel(Level.ALL);
+        long startOfOpenOfflineStore = System.currentTimeMillis();
         AndroidSystem.setContext(getApplicationContext());
 
         OfflineODataDelegate delegate = new OfflineODataDelegate() {
@@ -414,6 +436,12 @@ public class MainActivity extends AppCompatActivity {
         myOfflineDataProvider.open(() -> {
             Log.d(myTag, "Offline store opened");
             toastAMessage("Offline store opened");
+            long openOfflineStoreTime = System.currentTimeMillis() - startOfOpenOfflineStore;
+            long appReadyTime = System.currentTimeMillis() - startTime;
+            float openOfflineStoreTimeInSeconds = new Float(Math.round(openOfflineStoreTime/10)) / 100;
+            float appReadyTimeInSeconds = new Float(Math.round(appReadyTime/10)) / 100;
+            Log.d(myTag, "Offline store opened in " + openOfflineStoreTimeInSeconds + " seconds.");
+            Log.d(myTag, "App is ready " + appReadyTimeInSeconds + " seconds after the application started.");
             final Button offlineODataButton = (Button) findViewById(R.id.b_offlineOData);
             Handler handler = new Handler(Looper.getMainLooper());
             handler.post(new Runnable() {
@@ -496,5 +524,42 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         doUnbindService();
+    }
+
+    private void logout() {
+        Log.d(myTag, "In logout");
+        Request request = new Request.Builder()
+                .post(RequestBody.create(null, ""))
+                .url(serviceURL + "/mobileservices/sessions/logout")
+                .build();
+
+        Callback updateUICallback = new Callback() {
+            @Override
+            public void onFailure(Call call, final IOException e) {
+                Log.d(myTag, "onFailure called during registration " + e.getLocalizedMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, final Response response) throws IOException {
+                if (response.isSuccessful()) {
+                    Log.d(myTag, "Successfully logged out");
+                    toastAMessage("Successfully logged out");
+                    enableButtonsOnRegister(false);
+                    onRegister(null);
+                }
+                else {
+                    Log.d(myTag, "Logout failed " + response.networkResponse());
+                    toastAMessage("Logout failed " + response.networkResponse());
+                }
+            }
+        };
+
+        myOkHttpClient.newCall(request).enqueue(updateUICallback);
+    }
+
+    public void onUnregister(final View view) {
+        Log.d(myTag, "In onUnregister");
+        bapStore.deleteAllCredentials();
+        logout();
     }
 }
