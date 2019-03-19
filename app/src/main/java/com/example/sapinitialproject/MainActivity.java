@@ -225,6 +225,7 @@ public class MainActivity extends AppCompatActivity {
                     long registerTime = System.currentTimeMillis() - startTime;
                     float registerTimeInSeconds = new Float(Math.round(registerTime/10)) / 100;
                     Log.d(myTag, "Registration finished " + registerTimeInSeconds + " seconds after the application started.");
+                    initializeUsage();
                 }
                 else { //called if the credentials are incorrect
                     Log.d(myTag, "Registration failed " + response.networkResponse());
@@ -442,6 +443,23 @@ public class MainActivity extends AppCompatActivity {
             float appReadyTimeInSeconds = new Float(Math.round(appReadyTime/10)) / 100;
             Log.d(myTag, "Offline store opened in " + openOfflineStoreTimeInSeconds + " seconds.");
             Log.d(myTag, "App is ready " + appReadyTimeInSeconds + " seconds after the application started.");
+            AppUsage.event(
+                    "timerType",
+                    "appReadyEventKey",
+                    4L,
+                    new AppUsageInfo()
+                            .action("App ready to be used")
+                            .value(appReadyTimeInSeconds + "")
+                            .category("App Metrics"));
+
+            AppUsage.event(
+                    "timerType",
+                    "timeToOpenOfflineStoreEventKey",
+                    4L,
+                    new AppUsageInfo()
+                            .action("Time for offline store to open")
+                            .value(openOfflineStoreTimeInSeconds + "")
+                            .category("App Metrics"));
             final Button offlineODataButton = (Button) findViewById(R.id.b_offlineOData);
             Handler handler = new Handler(Looper.getMainLooper());
             handler.post(new Runnable() {
@@ -561,5 +579,65 @@ public class MainActivity extends AppCompatActivity {
         Log.d(myTag, "In onUnregister");
         bapStore.deleteAllCredentials();
         logout();
+    }
+    @Override
+    protected void onStop() {
+        super.onStop();
+        Log.d(myTag, "onStop");
+        try {
+            AppUsage.eventEnd("appUsageType", "appDuration",
+                    new AppUsageInfo().duration("App has stopped"));
+            AppUsage.sessionEnd();
+        }
+        catch (IllegalStateException e) {
+            //this might happen if there was a problem during the initialization of the app
+            //and usage was not initialized before the onStop event fires
+            Log.d(myTag, "In onStop, and an exception occurred with ending the usage session.");
+        }
+    }
+
+    private void initializeUsage() {
+        EncryptionUtil.initialize(getApplicationContext());
+        try {
+            SettingsParameters sp = new SettingsParameters(serviceURL, appID, deviceID, "1.0");
+            AppUsage.initialize(getApplicationContext(), "myUsageStore", sp, EncryptionUtil.getEncryptionKey("sample_alias"));
+            //uploadUsage();  //upload any previous usage
+            AppUsage.sessionStart();
+            AppUsage.eventStart("appUsageType", "appDuration",
+                    new AppUsageInfo().duration("App has initialized"));
+            uploadUsage();  //upload any previous usage
+        }
+        catch (MalformedURLException e) {
+            e.printStackTrace();
+        }
+        catch (EncryptionError encryptionError) {
+            encryptionError.printStackTrace();
+        }
+        catch (OpenFailureException ex) {
+            myLogger.error("Failed to open Usage store.", ex);
+        }
+    }
+
+    public void uploadUsage() {
+        AppUsageUploader.UploadListener myUsageUploadListener = new AppUsageUploader.UploadListener() {
+            @Override
+            public void onSuccess() {
+                Log.d(myTag,"Successfully uploaded usage data");
+                toastAMessage("Successfully uploaded usage data");
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                Log.d(myTag,"Encountered error while uploading Message: " + throwable.getMessage());
+                toastAMessage("Encountered error while uploading.  Message: " + throwable.getMessage());
+            }
+
+            @Override
+            public void onProgress(int percentage) {
+                Log.d(myTag, "Usage upload % " + percentage);
+            }
+        };
+        AppUsageUploader.setListener(myUsageUploadListener);
+        AppUsageUploader.upload(myOkHttpClient);
     }
 }
