@@ -19,6 +19,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -98,9 +99,9 @@ public class MainActivity extends AppCompatActivity {
     private final String myTag = "myDebuggingTag";
     private OkHttpClient myOkHttpClient;
     private String deviceID;
-    private final String serviceURL = "https://hcpms-p2001193513trial.hanatrial.ondemand.com";  //change p1743065160
-    private final String appID = "com.example.sapinititalproject";
-    private final String connectionID = "com.sap.edm.sampleservice.v2";
+    private  String serviceURL;
+    private  String appID;
+    private  String connectionID;
     private String messageToToast;
     private Toast toast;
     private String currentUser;
@@ -144,6 +145,8 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    private ConfigurationLoader discoveryServiceConfigurationLoader;
+
     public MainActivity() {
     }
 
@@ -173,7 +176,7 @@ public class MainActivity extends AppCompatActivity {
         catch (EncryptionError encryptionError) {
             encryptionError.printStackTrace();
         }
-        onRegister(null);
+        getConfigurationFromDiscoveryService();
         setContentView(R.layout.activity_main);
     }
 
@@ -639,5 +642,125 @@ public class MainActivity extends AppCompatActivity {
         };
         AppUsageUploader.setListener(myUsageUploadListener);
         AppUsageUploader.upload(myOkHttpClient);
+    }
+    private void getConfiguration() {
+        ConfigurationLoaderCallback myConfigCallback = new ConfigurationLoaderCallback() {
+            public void onCompletion(ProviderIdentifier providerId, boolean success) {
+                Log.d(myTag, "Provider loaded successfully.  " + providerId);
+                try {
+                    JSONObject config = DefaultPersistenceMethod.getPersistedConfiguration(getApplicationContext());
+                    serviceURL = config.getString("serviceURL");
+                    appID = config.getString("appID");
+                    connectionID = config.getString("connectionID");
+                    Log.d(myTag, "Config data is:  " + config.toString());
+                    onRegister(null);
+                } catch (ConfigurationPersistenceException e) {
+                    e.printStackTrace();
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            public void onError(ConfigurationLoader configurationLoader,
+                                ProviderIdentifier providerId,
+                                UserInputs requestedInput,
+                                ConfigurationProviderError error) {
+                Log.d(myTag, "Provider failed to load.  " + error);
+            }
+
+            public void onInputRequired(ConfigurationLoader configurationLoader, UserInputs requestedInput) {
+                Log.d(myTag, "Provider requires input. " + requestedInput);
+            }
+        };
+
+        final ConfigurationLoader myLoader = new ConfigurationLoader(getApplicationContext(), myConfigCallback);
+        myLoader.loadConfiguration();
+    }
+    private void getConfigurationFromDiscoveryService() {
+        ConfigurationLoaderCallback myConfigCallback = new ConfigurationLoaderCallback() {
+            public void onCompletion(ProviderIdentifier providerId, boolean success) {
+                Log.d(myTag, "Provider loaded successfully.  " + providerId);
+                try {
+                    JSONObject config = DefaultPersistenceMethod.getPersistedConfiguration(getApplicationContext());
+                    serviceURL = config.getString("serviceURL");
+                    appID = config.getString("appID");
+                    connectionID = config.getString("connectionID");
+                    Log.d(myTag, "Config data is:  " + config.toString());
+                    onRegister(null);
+                } catch (ConfigurationPersistenceException e) {
+                    e.printStackTrace();
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            public void onError(ConfigurationLoader configurationLoader,
+                                ProviderIdentifier providerId,
+                                UserInputs requestedInput,
+                                ConfigurationProviderError error) {
+                Log.d(myTag, "Provider failed to load.  " + error);
+            }
+
+            public void onInputRequired(ConfigurationLoader configurationLoader, UserInputs requestedInput) {
+                JSONObject config = null;
+                //Don't try to download the configuration data if we already have saved data.
+                try {
+                    config = DefaultPersistenceMethod.getPersistedConfiguration(getApplicationContext());
+                } catch (ConfigurationPersistenceException e) {
+                    e.printStackTrace();
+                }
+                if (config.length() != 0) {
+                    configurationLoader.processRequestedInputs(requestedInput);
+                }
+                else {
+                    Log.d(myTag, "Provider requires input. " + requestedInput);
+                    discoveryServiceConfigurationLoader = configurationLoader;
+                    getEmail();
+                }
+            }
+        };
+
+        ConfigurationProvider[] providers = new ConfigurationProvider[] {
+                //new DiscoveryServiceConfigurationProvider(getApplicationContext())  //explicitly using string below to show the value
+                new DiscoveryServiceConfigurationProvider("com.example.sapinititalproject:1.0")
+        };
+        final ConfigurationLoader myLoader = new ConfigurationLoader(getApplicationContext(), myConfigCallback, providers);
+
+        myLoader.loadConfiguration();
+    }
+
+    //https://stackoverflow.com/questions/10903754/input-text-dialog-android
+    private void getEmail() {  //This dialog could also be provided by the Fiori Onboariding Library
+        AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar_MinWidth);
+        builder.setMessage("Enter your email address to download the configuration for your app.");
+        builder.setTitle("Enter email");
+
+        //Set up the input
+        View viewInflated = LayoutInflater.from(this).inflate(R.layout.email_edit_text_layout, (ViewGroup)findViewById(android.R.id.content), false);
+        final EditText input = (EditText) viewInflated.findViewById(R.id.input);
+        input.setText("Lucas@trial-p2001193513trial.sapmobileplace.com");  //TODO, hardcoded to make it easier to test
+        builder.setView(viewInflated);
+
+        // Set up the buttons
+        builder.setPositiveButton("OK", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                String email4DiscoveryService = input.getText().toString();
+                Log.d(myTag, "Email is: " + input.getText().toString());
+                UserInputs inputs = new UserInputs();
+                ProviderInputs discoveryInputs = new ProviderInputs();
+                discoveryInputs.addInput(DiscoveryServiceConfigurationProvider.EMAIL_ADDRESS, email4DiscoveryService);
+                inputs.addProvider(ProviderIdentifier.DISCOVERY_SERVICE_CONFIGURATION_PROVIDER, discoveryInputs);
+                discoveryServiceConfigurationLoader.processRequestedInputs(inputs);
+            }
+        });
+        builder.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                dialog.cancel();
+            }
+        });
+
+        builder.show();
     }
 }

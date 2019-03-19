@@ -1,0 +1,5 @@
+{
+  serviceURL:"https://hcpms-p2001193513trial.hanatrial.ondemand.com",
+  appID:"com.example.sapinititalproject",
+  connectionID:"com.sap.edm.sampleservice.v2"
+}
