@@ -33,6 +33,9 @@ import com.sap.cloud.mobile.foundation.authentication.OAuth2BrowserProcessor;
 import com.sap.cloud.mobile.foundation.authentication.OAuth2Configuration;
 import com.sap.cloud.mobile.foundation.authentication.OAuth2Interceptor;
 import com.sap.cloud.mobile.foundation.authentication.OAuth2WebViewProcessor;
+import com.sap.cloud.mobile.foundation.authentication.SamlConfiguration;
+import com.sap.cloud.mobile.foundation.authentication.SamlInterceptor;
+import com.sap.cloud.mobile.foundation.authentication.SamlWebViewProcessor;
 import com.sap.cloud.mobile.foundation.common.ClientProvider;
 import com.sap.cloud.mobile.foundation.common.EncryptionError;
 import com.sap.cloud.mobile.foundation.common.EncryptionUtil;
@@ -196,9 +199,12 @@ public class MainActivity extends AppCompatActivity {
         Log.d(myTag, "In onRegister");
         Logger authLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("com.sap.cloud.mobile.foundation.authentication");
         authLogger.setLevel(Level.DEBUG);
+        SamlConfiguration samlConfiguration = new SamlConfiguration.Builder()
+                .authUrl(serviceURL + "/SAMLAuthLauncher")
+                .build();
         myOkHttpClient = new OkHttpClient.Builder()
                 .addInterceptor(new AppHeadersInterceptor(appID, deviceID, "1.0"))
-                .authenticator(new BasicAuthDialogAuthenticator(bapStore))
+                .addInterceptor(new SamlInterceptor(new SamlWebViewProcessor(samlConfiguration)))
                 .cookieJar(new WebkitCookieJar())
                 .build();
 
@@ -373,13 +379,13 @@ public class MainActivity extends AppCompatActivity {
         myDataProvider.setPrettyTracing(true);
         myDataProvider.setTraceWithData(true);
 
+
         Log.d(myTag, "In aysncOData");
         DataQuery query = new DataQuery()
                 .from(ESPMContainerMetadata.EntitySets.products)
                 .select(Product.name)
                 .where(Product.category.equal("Notebooks"))
                 .orderBy(Product.name);
-
         myServiceContainer.getProductsAsync(query, (List<Product> products) -> {
             toastAMessage(products.size() + " products returned");
             for (Product product : products) {
