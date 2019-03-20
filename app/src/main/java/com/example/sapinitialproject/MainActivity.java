@@ -150,6 +150,12 @@ public class MainActivity extends AppCompatActivity {
 
     private ConfigurationLoader discoveryServiceConfigurationLoader;
 
+    private SAPOAuthTokenStore oAuthTokenStore;
+    private String oAuthAuthorizationEndpoint;
+    private String oAuthClientID;
+    private String oAuthRedirectURL;
+    private String oAuthTokenEndpoint;
+
     public MainActivity() {
     }
 
@@ -171,7 +177,8 @@ public class MainActivity extends AppCompatActivity {
         SecureKeyValueStore myStore = new SecureKeyValueStore(this.getApplicationContext(), "mySecureStore");
         try {
             myStore.open(EncryptionUtil.getEncryptionKey("myAlias"));  //For additional security, consider using a passcode screen.
-            bapStore = new BasicAuthPersistentStore(myStore);
+            //bapStore = new BasicAuthPersistentStore(myStore);
+            oAuthTokenStore = new SAPOAuthTokenStore(myStore);
         }
         catch (OpenFailureException e) {
             e.printStackTrace();
@@ -199,14 +206,20 @@ public class MainActivity extends AppCompatActivity {
         Log.d(myTag, "In onRegister");
         Logger authLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("com.sap.cloud.mobile.foundation.authentication");
         authLogger.setLevel(Level.DEBUG);
-        SamlConfiguration samlConfiguration = new SamlConfiguration.Builder()
-                .authUrl(serviceURL + "/SAMLAuthLauncher")
+        OAuth2Configuration oAuth2Configuration = new OAuth2Configuration.Builder(getApplicationContext())
+                .clientId(oAuthClientID)
+                .responseType("code")
+                .authUrl(oAuthAuthorizationEndpoint)
+                .tokenUrl(oAuthTokenEndpoint)
+                .redirectUrl(oAuthRedirectURL)
                 .build();
+
         myOkHttpClient = new OkHttpClient.Builder()
+                .addInterceptor(new OAuth2Interceptor(new OAuth2WebViewProcessor(oAuth2Configuration), oAuthTokenStore))
                 .addInterceptor(new AppHeadersInterceptor(appID, deviceID, "1.0"))
-                .addInterceptor(new SamlInterceptor(new SamlWebViewProcessor(samlConfiguration)))
                 .cookieJar(new WebkitCookieJar())
                 .build();
+        ClientProvider.set(myOkHttpClient);  //The OAuth flow will use this for requesting the token
 
         Request request = new Request.Builder()
                 .get()
@@ -572,7 +585,8 @@ public class MainActivity extends AppCompatActivity {
                     Log.d(myTag, "Successfully logged out");
                     toastAMessage("Successfully logged out");
                     enableButtonsOnRegister(false);
-                    onRegister(null);
+                    //onRegister(null);
+                    System.exit(0);
                 }
                 else {
                     Log.d(myTag, "Logout failed " + response.networkResponse());
@@ -586,7 +600,9 @@ public class MainActivity extends AppCompatActivity {
 
     public void onUnregister(final View view) {
         Log.d(myTag, "In onUnregister");
-        bapStore.deleteAllCredentials();
+        //bapStore.deleteAllCredentials();
+        oAuthTokenStore.deleteAllTokens();
+        CookieManager.getInstance().removeAllCookies(null);
         logout();
     }
     @Override
@@ -691,6 +707,11 @@ public class MainActivity extends AppCompatActivity {
                     serviceURL = config.getString("serviceURL");
                     appID = config.getString("appID");
                     connectionID = config.getString("connectionID");
+                    oAuthAuthorizationEndpoint = config.getJSONArray("auth").getJSONObject(0).getJSONObject("config").getString("oauth2.authorizationEndpoint");
+                    oAuthTokenEndpoint = config.getJSONArray("auth").getJSONObject(0).getJSONObject("config").getString("oauth2.tokenEndpoint");
+                    oAuthClientID = config.getJSONArray("auth").getJSONObject(0).getJSONObject("config").getJSONArray("oauth2.clients").getJSONObject(0).getString("clientID");
+                    oAuthRedirectURL = config.getJSONArray("auth").getJSONObject(0).getJSONObject("config").getJSONArray("oauth2.clients").getJSONObject(0).getString("redirectURL");
+
                     Log.d(myTag, "Config data is:  " + config.toString());
                     onRegister(null);
                 } catch (ConfigurationPersistenceException e) {
